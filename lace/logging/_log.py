@@ -9,7 +9,7 @@ pad = 0
 
 def setLevel(level, showtrace=False, showlevel=False):
     global use_pad
-    use_pad = showlevels
+    use_pad = showlevel
     getLogger().setLevel(level)
     trace.use = showtrace
 def getLogger():
@@ -101,7 +101,7 @@ def getLogger():
     return log
 
 class trace(object):
-    use = True
+    use = False
     def info(cls):
         return lambda f: trace._do(getLogger().log, f, cls)
     def debug(cls):
