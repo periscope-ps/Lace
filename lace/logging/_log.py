@@ -3,16 +3,7 @@ import os
 
 from logging import DEBUG, INFO, CRITICAL, WARN, ERROR
 
-NAME = "lace"
-use_pad = False
-pad = 0
-
-def setLevel(level, showtrace=False, showlevel=False):
-    global use_pad
-    use_pad = showlevel
-    getLogger().setLevel(level)
-    trace.use = showtrace
-def getLogger():
+def getLogger(name="lacedefault"):
     class ColourFormatter(logging.Formatter):
         def __init__(self, fmt, datefmt=None):
             self.colours = { 
@@ -24,7 +15,7 @@ def getLogger():
             }
             super(ColourFormatter, self).__init__(fmt, datefmt, '{')
         
-        def _buildStr(self, *args, **kwargs):
+        def _buildStr(self, args, kwargs, pad):
             lens = []
             tmpargs = []
             tmpkwargs = []
@@ -48,7 +39,7 @@ def getLogger():
                 
             lens = sorted(lens, key=lambda v: v[0])
             try:
-                size = os.get_terminal_size().columns - 40 - (pad if use_pad else 0)
+                size = os.get_terminal_size().columns - 40 - pad
             except OSError:
                 size = 10000000
             while s > max(0, size):
@@ -68,20 +59,22 @@ def getLogger():
             return base_str.format(args_str, kwargs_str)
             
         def format(self, record):
+            isfunc = True
+            pad = 0
             old_fmt = self._style._fmt
             if len(record.args) and record.args[0]:
                 caller = " {}".format(record.args[0])
             else:
                 caller = ""
             try:
-                args, kwargs, isfunc = record.args[1]
+                args, kwargs, pad = record.args[1]
             except IndexError:
                 isfunc = False
             record.args = []
             if isfunc:
-                record.msg = self._buildStr(*args, **kwargs)
+                record.msg = self._buildStr(args, kwargs, pad)
             fmt = old_fmt.format(levelname=record.levelname[:1],
-                                 pad="-" * (pad if use_pad and isfunc else 0),
+                                 pad="-" * pad,
                                  color=self.colours[record.levelno],
                                  reset="\033[0m",
                                  caller=caller)
@@ -90,7 +83,7 @@ def getLogger():
             self._style._fmt = old_fmt
             return result
     
-    log = logging.getLogger(NAME)
+    log = logging.getLogger(name)
     if not log.handlers:
         cout = logging.StreamHandler()
         log.addHandler(cout)
@@ -101,47 +94,68 @@ def getLogger():
     return log
 
 class trace(object):
-    use = False
-    def info(cls):
-        return lambda f: trace._do(getLogger().log, f, cls)
-    def debug(cls):
-        return lambda f: trace._do(getLogger().debug, f, cls)
-    def error(cls):
-        return lambda f: trace._do(getLogger().error, f, cls)
-    def critical(cls):
-        return lambda f: trace._do(getLogger().critical, f, cls)
-    def warn(cls):
-        return lambda f: trace._do(getLogger().critical, f, cls)
+    _level = logging.NOTSET
+    _pad = 0
+    _show_pad = False
+    _log = getLogger('_ltrace__')
+    def setLevel(level, showlevel=False):
+        trace._log.propagate = False
+        trace._level = level
+        trace._log.setLevel(level)
+        trace._show_pad = showlevel
         
-    def _do(op, f, cls):
+    def info(cls):
+        return lambda f: trace._do(trace._log.info, INFO, f, cls)
+    def debug(cls):
+        return lambda f: trace._do(trace._log.debug, DEBUG, f, cls)
+    def error(cls):
+        return lambda f: trace._do(trace._log.error, ERROR, f, cls)
+    def critical(cls):
+        return lambda f: trace._do(trace._log.critical, CRITICAL, f, cls)
+    def warn(cls):
+        return lambda f: trace._do(trace._log.warn, WARN, f, cls)
+        
+    def _do(op, level, f, cls):
         def wrapper(*args, **kwargs):
-            if not trace.use:
+            if trace._level == logging.NOTSET:
                 return f(*args, **kwargs)
-
-            # I just want you all to know I really hate this global.
-            global pad
-            compressed = (args, kwargs, True)
+                
+            trace._pad += 2 if level >= trace._level else 0
+            compressed = (args, kwargs, trace._pad if trace._show_pad else 0)
             op("", "{}.{}".format(cls, f.__name__), compressed)
-            pad += 2
             try:
                 result = f(*args, **kwargs)
             except:
-                pad -= 2
+                trace._pad -= 2 if level >= trace._level else 0
                 raise
-            pad -= 2
+            trace._pad -= 2 if level >= trace._level else 0
             return result
         return wrapper
         
 if __name__ == "__main__":
-    @trace.debug("unittest")
+    @trace.warn("unittest")
     def test(a, b):
         pass
     
+    @trace.info("unittest")
+    def recur1(depth):
+        if depth == 0:
+            return
+        else:
+            test(a=5, b=10)
+            recur2(depth)
+    
+    @trace.debug('unittest')
+    def recur2(depth):
+        recur1(depth - 1)
+    
     logger = getLogger()
-    setLevel(DEBUG)
+    logger.setLevel(DEBUG)
     logger.critical("This is a test")
     logger.warn("This is a test")
     logger.error("This is a test")
     logger.debug("This is a test")
     logger.info("This is a test")
+    trace.setLevel(logging.INFO, True)
     test("1", b="2")
+    recur1(10)
