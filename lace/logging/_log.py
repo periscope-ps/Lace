@@ -98,11 +98,11 @@ class trace(object):
     _pad = 0
     _show_pad = False
     _log = getLogger('_ltrace__')
-    def setLevel(level, showlevel=False):
+    def setLevel(level, showdepth=False):
         trace._log.propagate = False
         trace._level = level
         trace._log.setLevel(level)
-        trace._show_pad = showlevel
+        trace._show_pad = showdepth
         
     def info(cls):
         return lambda f: trace._do(trace._log.info, INFO, f, cls)
