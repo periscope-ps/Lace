@@ -1,1 +1,1 @@
-from lace.logging._log import trace, getLogger, DEBUG, INFO, CRITICAL, WARN, ERROR
+from lace.logging._log import trace, getLogger, NOTSET, DEBUG, INFO, CRITICAL, WARN, ERROR

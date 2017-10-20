@@ -1,7 +1,7 @@
 import logging
 import os
 
-from logging import DEBUG, INFO, CRITICAL, WARN, ERROR
+from logging import DEBUG, INFO, CRITICAL, WARN, ERROR, NOTSET
 from pprint import pprint
 levels = sorted([DEBUG, INFO, CRITICAL, WARN, ERROR])
 
@@ -9,11 +9,11 @@ def getLogger(name="lacedefault"):
     class ColourFormatter(logging.Formatter):
         def __init__(self, fmt, datefmt=None):
             self.colours = { 
-                logging.CRITICAL: "\033[1;31m",
-                logging.ERROR: "\033[0;31m",
-                logging.WARNING: "\033[0;33m",
-                logging.INFO: "\033[0;32m",
-                logging.DEBUG: "\033[0;34m"
+                CRITICAL: "\033[1;31m",
+                ERROR: "\033[0;31m",
+                WARN: "\033[0;33m",
+                INFO: "\033[0;32m",
+                DEBUG: "\033[0;34m"
             }
             super(ColourFormatter, self).__init__(fmt, datefmt, '{')
         
@@ -105,8 +105,8 @@ class trace(object):
         if trace._estop == 1:
             trace._log.warn("Tracing removed after creating callbacks, consider calling earlier")
         trace._estop = 2
-    _level = logging.NOTSET
-    _restore_level = logging.NOTSET
+    _level = NOTSET
+    _restore_level = NOTSET
     _pad = 0
     _show_pad = False
     _log = getLogger('_ltrace__')
@@ -224,7 +224,7 @@ class trace(object):
     def _do(op, level, f, cls):
         def wrapper(*args, **kwargs):
             call_name = "{}.{}".format(cls, f.__name__)
-            if trace._level == logging.NOTSET and call_name not in trace._breakpoints:
+            if trace._level == NOTSET and call_name not in trace._breakpoints:
                 return f(*args, **kwargs)
                 
             if call_name in trace._breakpoints:
@@ -274,6 +274,6 @@ if __name__ == "__main__":
     logger.error("This is a test")
     logger.debug("This is a test")
     logger.info("This is a test")
-    trace.setLevel(logging.INFO, True)
+    trace.setLevel(INFO, True)
     test("1", b="2")
     recur1(10)
