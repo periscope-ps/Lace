@@ -238,13 +238,14 @@ class trace(object):
             if trace._interactive and trace._level <= level:
                 trace._do_interactive(args, kwargs)
             try:
+                # This is the actual function
                 result = f(*args, **kwargs)
             except:
                 trace._pad -= 2 if level >= trace._level else 0
                 raise
             trace._pad -= 2 if level >= trace._level else 0
             if trace._show_return:
-                op(result, call_name, True, compressed)
+                op(str(result), call_name, True, compressed)
                 if trace._interactive and trace._level <= level:
                     trace._do_interactive(args, kwargs)
             return result
