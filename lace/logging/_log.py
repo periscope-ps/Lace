@@ -5,7 +5,7 @@ from logging import DEBUG, INFO, CRITICAL, WARN, ERROR, NOTSET
 from pprint import pprint
 levels = sorted([DEBUG, INFO, CRITICAL, WARN, ERROR])
 
-def getLogger(name="lacedefault"):
+def getLogger(name="__lace__"):
     class ColourFormatter(logging.Formatter):
         def __init__(self, fmt, datefmt=None):
             self.colours = { 
@@ -138,26 +138,32 @@ class trace(object):
         trace._estop = 1
         return lambda f: trace._do(trace._log.info, INFO, f, cls)
     def debug(cls):
-        if trace._estop:
+        if trace._estop == 2:
             return lambda f: f
         trace._estop = 1
         return lambda f: trace._do(trace._log.debug, DEBUG, f, cls)
     def error(cls):
-        if trace._estop:
+        if trace._estop == 2:
             return lambda f: f
         trace._estop = 1
         return lambda f: trace._do(trace._log.error, ERROR, f, cls)
     def critical(cls):
-        if trace._estop:
+        if trace._estop == 2:
             return lambda f: f
         trace._estop = 1
         return lambda f: trace._do(trace._log.critical, CRITICAL, f, cls)
     def warn(cls):
-        if trace._estop:
+        if trace._estop == 2:
             return lambda f: f
         trace._estop = 1
         return lambda f: trace._do(trace._log.warn, WARN, f, cls)
-
+    def none(f):
+        def _f(*args,**kwargs):
+            trace.setLevel(NOTSET)
+            result = f(*args, **kwargs)
+            trace.setLevel(trace._level)
+            return result
+        return _f
     def _do_interactive(args, kwargs):
         trace._tmp_level = trace._level
         v = 'noop'
