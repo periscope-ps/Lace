@@ -115,13 +115,14 @@ class trace(object):
     _breakpoints = []
     _estop = 0
     def setLevel(level, showdepth=False, showreturn=False):
-        trace._pad = 0
+        state = (trace._level, trace._show_pad, trace._show_return)
         trace._log.propagate = False
         trace._level = level
         trace._restore_level = level
         trace._log.setLevel(level)
         trace._show_pad = showdepth
         trace._show_return = showreturn
+        return state
         
     def runInteractive(v):
         trace._interactive = v
@@ -159,9 +160,9 @@ class trace(object):
         return lambda f: trace._do(trace._log.warn, WARN, f, cls)
     def none(f):
         def _f(*args,**kwargs):
-            trace.setLevel(NOTSET)
+            level = trace.setLevel(NOTSET)
             result = f(*args, **kwargs)
-            trace.setLevel(trace._level)
+            trace.setLevel(*level)
             return result
         return _f
     def _do_interactive(args, kwargs):
