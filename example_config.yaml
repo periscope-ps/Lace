@@ -1,0 +1,33 @@
+version: 1
+disable_existing_loggers: False
+formatters:
+  full:
+    format: '{color}[{levelname:.2} {asctime} {name}]{reset} {message}'
+    style: '{'
+  short:
+    format: "[{levelname:.2} {asctime}.{msecs:03.0f}] {message}"
+    style: '{'
+    datefmt: '%H:%M:%S'
+filters:
+  trace:
+    (): lace.logging.trace.filter
+handlers:
+  msg_file:
+    class: logging.FileHandler
+    level: DEBUG
+    formatter: short
+    filename: test_log.log
+  stderr:
+    class: logging.StreamHandler
+    level: INFO
+    formatter: full
+  trace_file:
+    class: logging.FileHandler
+    level: TLONG
+    formatter: short
+    filters: [trace]
+    filename: test_trace.log
+loggers:
+  test:
+    handlers: [msg_file, stderr, trace_file]
+    level: TLONG

@@ -1,129 +1,57 @@
-import logging
-import os
+import logging, os, distutils.util
+from collections.abc import Iterable
+from functools import wraps
 
 from logging import DEBUG, INFO, CRITICAL, WARN, ERROR, NOTSET
 from pprint import pprint
-levels = sorted([DEBUG, INFO, CRITICAL, WARN, ERROR])
 
-def getLogger(name="__lace__"):
-    class ColourFormatter(logging.Formatter):
-        def __init__(self, fmt, datefmt=None):
-            self.colours = { 
-                CRITICAL: "\033[1;31m",
-                ERROR: "\033[0;31m",
-                WARN: "\033[0;33m",
-                INFO: "\033[0;32m",
-                DEBUG: "\033[0;34m"
-            }
-            super(ColourFormatter, self).__init__(fmt, datefmt, '{')
-        
-        def _buildStr(self, args, kwargs, pad):
-            lens = []
-            tmpargs = []
-            tmpkwargs = []
-            s = 0
-            for arg in args:
-                if arg == "":
-                    tmpStr = "\"\", "
-                else:
-                    tmpStr = "{}".format(repr(arg))
-                lens.append((len(tmpStr), tmpargs, len(tmpargs)))
-                tmpargs.append(tmpStr)
-                s += len(tmpStr)
-            for k, arg in kwargs.items():
-                if arg == "":
-                    tmpStr = "\"\", "
-                else:
-                    tmpStr = "{}".format(repr(arg))
-                lens.append((len(tmpStr) + len(k), tmpkwargs, len(tmpkwargs)))
-                tmpkwargs.append((k, tmpStr))
-                s += len(tmpStr)
-                
-            lens = sorted(lens, key=lambda v: v[0])
-            try:
-                size = os.get_terminal_size().columns - 40 - pad
-            except OSError:
-                size = 10000000
-            while s > max(0, size):
-                l, ls, i = lens.pop()
-                ls[i] = "..." if isinstance(ls[i], str) else (ls[0], "...")
-                s -= l
-            args_str = ", ".join(tmpargs)
-            kwargs_str = ", ".join(["{}: {}".format(k, v) for k, v in tmpkwargs])
-            base_str = "{}{}{}".format("args=[{}]" if args_str else "{}", 
-                                       ", " if args_str and kwargs_str else "", 
-                                       "kwargs={{{}}}" if kwargs_str else "{}")
-            base_str = base_str or "No arguments passed{}{}"
-            if len(base_str) + len(args_str) + len(kwargs_str) > size:
-                base_str = "Arguments too long, trucating..."
-                args_str = ""
-                kwargs_str = ""
-            return base_str.format(args_str, kwargs_str)
-            
-        def format(self, record):
-            isfunc = True
-            pad = 0
-            pchar = "-"
-            old_fmt = self._style._fmt
-            if len(record.args) and record.args[0]:
-                caller = " {}".format(record.args[0])
-            else:
-                caller = ""
-            try:
-                isreturn = record.args[1]
-                args, kwargs, pad = record.args[2]
-            except IndexError:
-                isfunc = False
-            record.args = []
-            if isfunc:
-                if not isreturn:
-                    record.msg = self._buildStr(args, kwargs, pad)
-                else:
-                    pchar = "<"
-            fmt = old_fmt.format(levelname=record.levelname[:1],
-                                 pad=pchar * pad,
-                                 color=self.colours[record.levelno],
-                                 reset="\033[0m",
-                                 caller=caller)
-            self._style._fmt = fmt
-            result = logging.Formatter.format(self, record)
-            self._style._fmt = old_fmt
-            return result
-    
-    log = logging.getLogger(name)
-    if not log.handlers:
-        cout = logging.StreamHandler()
-        log.addHandler(cout)
-    
-    for handler in log.handlers:
-        handler.setFormatter(ColourFormatter("{pad}{color}[{levelname} {{asctime}}{caller}]{reset} {{message}}"))
-    
-    return log
+DEFAULT_NAMESPACE = "__lace__"
+TRACE_OBJECTS, TRACE_PUBLIC, TRACE_ALL = 7, 6, 5
+[logging.addLevelName(l,n) for l,n in [(TRACE_ALL, "TLONG"), (TRACE_PUBLIC, "TSHORT"), (TRACE_OBJECTS, "TNEW")]]
+
+
+def getLogger(name=DEFAULT_NAMESPACE): return logging.getLogger(name)
 
 class trace(object):
-    def remove():
-        if trace._estop == 1:
-            trace._log.warn("Tracing removed after creating callbacks, consider calling earlier")
-        trace._estop = 2
-    _level = NOTSET
-    _restore_level = NOTSET
-    _pad = 0
-    _show_pad = False
-    _log = getLogger('_ltrace__')
-    _interactive = False
-    _show_return = False
-    _breakpoints = []
-    _estop = 0
-    def setLevel(level, showdepth=False, showreturn=False):
-        state = (trace._level, trace._show_pad, trace._show_return)
-        trace._log.propagate = False
-        trace._level = level
-        trace._restore_level = level
-        trace._log.setLevel(level)
-        trace._show_pad = showdepth
-        trace._show_return = showreturn
-        return state
+    class filter(object):
+        def filter(self, record):
+            return record.levelno < DEBUG
+
+    def enabled(v=None):
+        if not isinstance(v, type(None)):
+            if trace._active:
+                getLogger().warning("Tracing already generated on {}, unable to add/remove".format(trace._active))
+            trace._enabled = v
+        return bool(distutils.util.strtobool(os.environ.get('LACE_TRACE_ON', 'false'))) or trace._enabled
+    _pad, _show_pad, _show_return = 0, False, False
+    _interactive, _breakpoints = False, []
+    _enabled, _active = False, False
+
+    def _buildlogger(n, level):
+        def _wrapper(f):
+            logger = getLogger("{}.{}".format(n, f.__name__))
+            return trace._do(logger, level, f)
+        def _ident(f): return f
         
+        trace._active = n
+        return _wrapper if trace.enabled() else _ident
+    
+    def _fn_desc(args, kwargs):
+        def shorten(v):
+            if isinstance(v, (int, float, str)): return v
+            elif isinstance(v, Iterable): return "{}[{}]".format(type(v), len(v))
+            elif isinstance(v, type): return "class_{}".format(v.__name__)
+            elif isinstance(v, object): return "obj_{}".format(type(v).__name__)
+            else: return v
+            
+        args = ["args=[{}]".format(", ".join([repr(shorten(a)) if a else '""' for a in args]))] if args else []
+        kwargs = ["kwargs={{{}}}".format(", ".join(["{}: {}".format(k,repr(shorten(v) if v else '""')) for k,v in kwargs.items()]))] if kwargs else []
+        return ", ".join(args + kwargs)
+
+    def showCallDepth(v):
+        trace._show_pad = v
+    def showReturn(v):
+        trace._show_return = v
     def runInteractive(v):
         trace._interactive = v
     def setBreakpoint(v):
@@ -133,155 +61,91 @@ class trace(object):
             trace._breakpoints.remove(v)
         except ValueError:
             pass
-    def info(cls):
-        if trace._estop == 2:
-            return lambda f: f
-        trace._estop = 1
-        return lambda f: trace._do(trace._log.info, INFO, f, cls)
-    def debug(cls):
-        if trace._estop == 2:
-            return lambda f: f
-        trace._estop = 1
-        return lambda f: trace._do(trace._log.debug, DEBUG, f, cls)
-    def error(cls):
-        if trace._estop == 2:
-            return lambda f: f
-        trace._estop = 1
-        return lambda f: trace._do(trace._log.error, ERROR, f, cls)
-    def critical(cls):
-        if trace._estop == 2:
-            return lambda f: f
-        trace._estop = 1
-        return lambda f: trace._do(trace._log.critical, CRITICAL, f, cls)
-    def warn(cls):
-        if trace._estop == 2:
-            return lambda f: f
-        trace._estop = 1
-        return lambda f: trace._do(trace._log.warn, WARN, f, cls)
-    def none(f):
-        def _f(*args,**kwargs):
-            level = trace.setLevel(NOTSET)
-            result = f(*args, **kwargs)
-            trace.setLevel(*level)
-            return result
-        return _f
+    def tlong(cls): return trace._buildlogger(cls, TRACE_ALL)
+    def tshort(cls): return trace._buildlogger(cls, TRACE_PUBLIC)
+    def tobj(cls): return trace._buildlogger(cls, TRACE_OBJECTS)
+    def info(cls): return trace._buildlogger(cls, INFO)
+    def debug(cls): return trace._buildlogger(cls, DEBUG)
+    def error(cls): return trace._buildlogger(cls, ERROR)
+    def critical(cls): return trace._buildlogger(cls, CRITICAL)
+    def warn(cls): return trace._buildlogger(cls, WARN)
+    
     def _do_interactive(args, kwargs):
-        trace._tmp_level = trace._level
-        v = 'noop'
-        while v != 'n' and v != '':
-            v = input("[h|help for commands]: ")
-            if v == 'h' or v == 'help':
-                print("[enter] | n: next")
-                print("a: display args")
-                print("#: display arg by index")
-                print("k <[OPTIONAL] name>: display kwargs <by name>")
-                print("i: increase log level")
-                print("d: decrease log level")
-                print("c: continue")
-                print("+r: show return values")
-                print("-r: hide return values")
-                print("+b <name>: set breakpoint")
-                print("-b <name>: remove breakpoint")
-            elif v == "a":
-                pprint(args)
-            elif v and v[0] == "k":
-                v = v.split()
-                if len(v) == 1:
-                    pprint(kwargs)
-                else:
-                    if v[1] in kwargs:
-                        pprint(kwargs[v[1]])
-                    else:
-                        print("bad command, unknown kwarg name")
-            elif v == 'd':
-                trace._level = levels[min(len(levels), levels.index(trace._level) + 1)]
-                trace._log.setLevel(trace._level)
-            elif v == 'i':
-                trace._level = levels[max(0, levels.index(trace._level) - 1)]
-                trace._log.setLevel(trace._level)
-            elif v == 'c':
-                trace._interactive = False
-                trace._level = trace._restore_level
-                trace._log.setLevel(trace._level)
-                v = ''
-            elif v[:2] == '+r':
-                trace._show_return = True
-            elif v[:2] == '-r':
-                trace._show_return = False
-            elif v[:2] == '+b':
-                v = v.split()
-                trace._breakpoints.append(v[1])
+        v = 'none'
+        while v not in ['n', 'c']:
+            v = input("[h|help for commands]: ") or v
+            if v in ['h', 'help']:
+                print("""
+                [enter] | n: next
+                a: display args
+                #: display arg by index
+                k <[OPTIONAL] name>: display kwargs <by name>
+                i: increase log level  (Temporarily unavailable)
+                d: decrease log level  (Temporarily unavailable)
+                c: continue
+                r: toggle return values
+                +b <name>: set breakpoint
+                -b <name>: remove breakpoint
+                """)
+            elif v == "a": pprint(args)
+            elif v[0] == "k":
+                try: pprint(kwargs[v.split()[1]])
+                except IndexError: pprint(kwargs)
+                except KeyError: print("Unknown keyword")
+            elif v == 'c': trace._interactive = False
+            elif v == 'r': trace._show_return = not trace._show_return
+            elif v[:2] == '+b': trace._breakpoints.append(v.split()[1])
             elif v[:2] == '-b':
-                v = v.split()
-                try:
-                    trace._breakpoints.remove(v[1])
-                except ValueError:
-                    pass
+                try: trace._breakpoints.remove(v.split()[1])
+                except ValueError: pass
             elif v.isdigit():
-                try:
-                    pprint(args[int(v)])
-                except IndexError:
-                    print("index out of bound")
-            elif v in kwargs:
-                pprint(kwargs[v])
-            elif v != 'n' and v != '':
-                print("keyword not in function")
+                try: pprint(args[int(v)])
+                except IndexError: print("index out of bound")
+            elif v in kwargs: pprint(kwargs[v])
+            elif v != 'n' and v != '': print("keyword not in function")
 
-        
-    def _do(op, level, f, cls):
+    def _do(logger, level, f):
+        @wraps(f)
         def wrapper(*args, **kwargs):
-            call_name = "{}.{}".format(cls, f.__name__)
-            if trace._level == NOTSET and call_name not in trace._breakpoints:
+            if not (logger.isEnabledFor(level) or logger.name in trace._breakpoints):
                 return f(*args, **kwargs)
-                
-            if call_name in trace._breakpoints:
+
+            if logger.name in trace._breakpoints:
                 trace._interactive = True
-                trace._level = min(level, trace._level) if trace._level else level
-                trace._log.setLevel(trace._level)
-            trace._pad += 2 if level >= trace._level else 0
-            compressed = (args, kwargs, trace._pad if trace._show_pad else 0)
-            op("", call_name, False, compressed)
+            trace._pad += 2
+            logger.log(level, "{}{}".format("-" * trace._pad if trace._show_pad else "", trace._fn_desc(args, kwargs)))
             
-            if trace._interactive and trace._level <= level:
+            if trace._interactive:
                 trace._do_interactive(args, kwargs)
             try:
                 # This is the actual function
                 result = f(*args, **kwargs)
+                if trace._show_return:
+                    logger.log(level, "{}{}".format("<" * trace._pad if trace._show_pad else "", result))
+                return result
             except:
-                trace._pad -= 2 if level >= trace._level else 0
                 raise
-            trace._pad -= 2 if level >= trace._level else 0
-            if trace._show_return:
-                op(str(result), call_name, True, compressed)
-                if trace._interactive and trace._level <= level:
-                    trace._do_interactive(args, kwargs)
-            return result
+            finally:
+                trace._pad -= 2
         return wrapper
-        
-if __name__ == "__main__":
-    @trace.warn("unittest")
-    def test(a, b):
-        pass
-    
-    @trace.info("unittest")
-    def recur1(depth):
-        if depth == 0:
-            return
-        else:
-            test(a=5, b=10)
-            recur2(depth)
-    
-    @trace.debug('unittest')
-    def recur2(depth):
-        recur1(depth - 1)
-    
-    logger = getLogger()
-    logger.setLevel(DEBUG)
-    logger.critical("This is a test")
-    logger.warn("This is a test")
-    logger.error("This is a test")
-    logger.debug("This is a test")
-    logger.info("This is a test")
-    trace.setLevel(INFO, True)
-    test("1", b="2")
-    recur1(10)
+
+    def __init__(self, ns="trace"):
+        self.ns = ns
+    def __call__(self, subject):
+        for n,fn in {k:v for k,v in subject.__dict__.items() if callable(v)}.items():
+            ns = "{}.New".format(self.ns, "New" if n == "__init__" else subject.__name__)
+            if not n.startswith("__") or n == "__init__":
+                if n == "__init__": setattr(subject, n, trace._buildlogger(ns, TRACE_OBJECTS)(fn))
+                if n.startswith("_"): setattr(subject, n, trace._buildlogger(ns, TRACE_ALL)(fn))
+                else: setattr(subject, n, trace._buildlogger(ns, TRACE_PUBLIC)(fn))
+        return subject
+
+_colors = {CRITICAL: "\033[1;31m", ERROR: "\033[0;31m", WARN: "\033[0;33m", INFO: "\033[0;32m", DEBUG: "\033[0;34m",
+           TRACE_PUBLIC: "\033[0;32m", TRACE_ALL: "\033[0;34m"}
+record_factory = logging.getLogRecordFactory()
+def _record_factory(name, level, fn, lno, msg, args, exc_info, func=None, sinfo=None, **kwargs):
+    record = record_factory(name, level, fn, lno, msg, args, exc_info, func, sinfo, **kwargs)
+    record.__dict__["color"] = _colors.get(level, "")
+    record.__dict__["reset"] = "\033[0m"
+    return record
+logging.setLogRecordFactory(_record_factory)
