@@ -1,4 +1,4 @@
-import logging, os, distutils.util
+import logging, os, distutils.util, types
 from collections.abc import Iterable
 from functools import wraps
 
@@ -13,6 +13,7 @@ TRACE_OBJECTS, TRACE_PUBLIC, TRACE_ALL = 7, 6, 5
 def getLogger(name=DEFAULT_NAMESPACE): return logging.getLogger(name)
 
 class trace(object):
+    lock = False
     class filter(object):
         def filter(self, record):
             return record.levelno < DEBUG
@@ -27,27 +28,15 @@ class trace(object):
     _interactive, _breakpoints = False, []
     _enabled, _active = False, False
 
-    def _buildlogger(n, level):
+    def _buildlogger(n, level, noself=False):
         def _wrapper(f):
             logger = getLogger("{}.{}".format(n, f.__name__))
-            return trace._do(logger, level, f)
+            return trace._do(logger, level, f, noself)
         def _ident(f): return f
         
         trace._active = n
         return _wrapper if trace.enabled() else _ident
     
-    def _fn_desc(args, kwargs):
-        def shorten(v):
-            if isinstance(v, (int, float, str)): return v
-            elif isinstance(v, Iterable): return "{}[{}]".format(type(v), len(v))
-            elif isinstance(v, type): return "class_{}".format(v.__name__)
-            elif isinstance(v, object): return "obj_{}".format(type(v).__name__)
-            else: return v
-            
-        args = ["args=[{}]".format(", ".join([repr(shorten(a)) if a else '""' for a in args]))] if args else []
-        kwargs = ["kwargs={{{}}}".format(", ".join(["{}: {}".format(k,repr(shorten(v) if v else '""')) for k,v in kwargs.items()]))] if kwargs else []
-        return ", ".join(args + kwargs)
-
     def showCallDepth(v):
         trace._show_pad = v
     def showReturn(v):
@@ -104,16 +93,41 @@ class trace(object):
             elif v in kwargs: pprint(kwargs[v])
             elif v != 'n' and v != '': print("keyword not in function")
 
-    def _do(logger, level, f):
+    def _do(logger, level, f, noself):
+        f.noself = noself
+        def _fn_desc(args, kwargs):
+            def shorten(v):
+                try:
+                    if isinstance(v, (int, float)): return v
+                    elif isinstance(v, str): return ((v[:12] + "...") if len(v) > 15 else v)
+                    elif hasattr(v, "__len__"):
+                        try: return "{}[{}]".format(type(v), len(v))
+                        except: return "{}".format(type(v))
+                    elif isinstance(v, type): return "class_{}".format(v.__name__)
+                    elif isinstance(v, object): return "obj_{}".format(type(v).__name__)
+                    else: return v
+                except:
+                    return v
+
+            trace.lock = True
+            try:
+                args = ["args=[{}]".format(", ".join([repr(shorten(a)) if a else '""' for a in args]))] if args else []
+                kwargs = ["kwargs={{{}}}".format(", ".join(["{}: {}".format(k,repr(shorten(v) if v else '""')) for k,v in kwargs.items()]))] if kwargs else []
+                trace.lock = False
+            except:
+                return "<unabled to build>"
+            return ", ".join(args + kwargs)
+
         @wraps(f)
         def wrapper(*args, **kwargs):
-            if not (logger.isEnabledFor(level) or logger.name in trace._breakpoints):
+            if trace.lock or not (logger.isEnabledFor(level) or logger.name in trace._breakpoints):
                 return f(*args, **kwargs)
 
             if logger.name in trace._breakpoints:
                 trace._interactive = True
             trace._pad += 2
-            logger.log(level, "{}{}".format("-" * trace._pad if trace._show_pad else "", trace._fn_desc(args, kwargs)))
+            s = 1 if noself else 0
+            logger.log(level, "{}{}".format("-" * trace._pad if trace._show_pad else "", _fn_desc(args[s:], kwargs)))
             
             if trace._interactive:
                 trace._do_interactive(args, kwargs)
@@ -132,16 +146,16 @@ class trace(object):
     def __init__(self, ns="trace"):
         self.ns = ns
     def __call__(self, subject):
-        for n,fn in {k:v for k,v in subject.__dict__.items() if callable(v)}.items():
-            ns = "{}.New".format(self.ns, "New" if n == "__init__" else subject.__name__)
+        ns = "{}.{}".format(self.ns, subject.__name__)
+        for n,fn in {k:v for k,v in subject.__dict__.items() if isinstance(v, types.FunctionType)}.items():
             if not n.startswith("__") or n == "__init__":
-                if n == "__init__": setattr(subject, n, trace._buildlogger(ns, TRACE_OBJECTS)(fn))
-                if n.startswith("_"): setattr(subject, n, trace._buildlogger(ns, TRACE_ALL)(fn))
+                if n == "__init__": setattr(subject, n, trace._buildlogger(ns, TRACE_OBJECTS, True)(fn))
+                elif n.startswith("_"): setattr(subject, n, trace._buildlogger(ns, TRACE_ALL)(fn))
                 else: setattr(subject, n, trace._buildlogger(ns, TRACE_PUBLIC)(fn))
         return subject
 
 _colors = {CRITICAL: "\033[1;31m", ERROR: "\033[0;31m", WARN: "\033[0;33m", INFO: "\033[0;32m", DEBUG: "\033[0;34m",
-           TRACE_PUBLIC: "\033[0;32m", TRACE_ALL: "\033[0;34m"}
+           TRACE_PUBLIC: "\033[0;32m", TRACE_ALL: "\033[0;34m", TRACE_OBJECTS: "\033[0;35m"}
 record_factory = logging.getLogRecordFactory()
 def _record_factory(name, level, fn, lno, msg, args, exc_info, func=None, sinfo=None, **kwargs):
     record = record_factory(name, level, fn, lno, msg, args, exc_info, func, sinfo, **kwargs)
