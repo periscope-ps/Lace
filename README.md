@@ -80,6 +80,7 @@ stderr = logging.StreamHandler()
 format = logging.Formatter("{color}[{levelname} {asctime} {name}]{reset} {message}")
 stderr.setFormatter(format)
 stderr.setLevel(lace.logging.TRACE_ALL)
+logger.addHandler(stderr)
 ```
 
 Lace also provides three new named logging levels:
@@ -131,6 +132,7 @@ stderr = logging.StreamHandler()
 format = logging.Formatter("{color}[{levelname} {asctime} {name}]{reset} {message}")
 stderr.setFormatter(format)
 stderr.setLevel(lace.logging.TRACE_ALL)
+logger.addHandler(stderr)
 ```
 
 This logger uses the `mytrace` namespace and will only recieve messages from messages within
