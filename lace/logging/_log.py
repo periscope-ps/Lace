@@ -114,8 +114,8 @@ class trace(object):
                 args = ["args=[{}]".format(", ".join([repr(shorten(a)) if a else '""' for a in args]))] if args else []
                 kwargs = ["kwargs={{{}}}".format(", ".join(["{}: {}".format(k,repr(shorten(v) if v else '""')) for k,v in kwargs.items()]))] if kwargs else []
                 trace.lock = False
-            except:
-                return "<unabled to build>"
+            except Exception as e:
+                return f"<unable to build - {e}>"
             return ", ".join(args + kwargs)
 
         @wraps(f)
@@ -158,8 +158,11 @@ _colors = {CRITICAL: "\033[1;31m", ERROR: "\033[0;31m", WARN: "\033[0;33m", INFO
            TRACE_PUBLIC: "\033[0;32m", TRACE_ALL: "\033[0;34m", TRACE_OBJECTS: "\033[0;35m"}
 record_factory = logging.getLogRecordFactory()
 def _record_factory(name, level, fn, lno, msg, args, exc_info, func=None, sinfo=None, **kwargs):
+    nparts = name.split('.')
     record = record_factory(name, level, fn, lno, msg, args, exc_info, func, sinfo, **kwargs)
     record.__dict__["color"] = _colors.get(level, "")
     record.__dict__["reset"] = "\033[0m"
+    record.__dict__["func"] = nparts[-1] if len(nparts) > 0 else ""
+    record.__dict__["class"] = nparts[-2] if len(nparts) > 1 else ""
     return record
 logging.setLogRecordFactory(_record_factory)
